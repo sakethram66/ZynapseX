@@ -12,10 +12,10 @@
 
 | Part | Status |
 |---|---|
-| Backend suite | **70 passed** with `python -m pytest -q --basetemp .pytest_tmp` |
+| Backend suite | **70 passed** with `python -m pytest -q --basetemp .pytest_tmp` (2 Pydantic warnings during WebSocket tests) |
 | Python syntax | **Passed** with `python -m compileall -q app` |
-| REST smoke checks | **Passed** against the running local server: health, status, assets, detail/history, predictions, recommendations, scenario list/injection/clear, and what-if |
-| Frontend production build | **Passed** with `npm run build` |
+| REST and fault-flow checks | **Passed**: health, status, assets, detail/history, predictions, recommendations, scenario injection/clear, and illustrative what-if; overheating on T01 yielded anomaly 0.7713, HIGH risk 50.54, two alerts, and an inspection recommendation |
+| Frontend production build | **Passed** with `npm run build` (Vite reports a >500 kB chunk advisory) |
 | Browser UI | **Not visually verified in this environment**; no browser surface was available. |
 
 Run the backend suite with:
@@ -107,7 +107,7 @@ simulator tick -> features -> anomaly detection -> risk estimate -> level -> exp
 
 Deterministic: same inputs give the same output.
 
-**Explanations** (`app/ml/explainability.py`): the score is an exact additive sum, so each factor's `contribution_points` adds up to the risk score, sorted largest first, with the values and limits that produced them.
+**Explanations** (`app/ml/explainability.py`): factor points follow the additive risk formula and are sorted largest first, with the values and limits that produced them. Values are rounded to two decimals and terms below 0.1 points are omitted, so the displayed points can differ slightly from the rounded risk score.
 
 **Decision engine** (`app/decision/decision_engine.py`): rules over the computed readings, features, anomaly and risk. Actions: inspect (urgent / routine / mechanical / electrical), reduce simulated load, evaluate load distribution, increase monitoring, run what-if. Each carries asset, priority, explanation, the concrete triggering conditions with values, and a timestamp. Recommendations are stored when new, escalated, or after a cooldown.
 
@@ -128,17 +128,9 @@ Full table, JSON samples and WebSocket message types: [`docs/FRONTEND_INTEGRATIO
 - **How you could use the datathon environment:** run the backend on the provided LinuxONE/Linux VM (`uvicorn app.main:app --host 0.0.0.0 --port 8000`), point `CORS_ORIGINS` at the frontend origin, and move SQLite to a managed database by changing `DATABASE_URL` (SQLAlchemy is already used; the models use only portable types, though I have only designed against SQLite).
 - Only claim IBM deployment in your presentation once you have actually run it there.
 
-## Adding this to your repository
+## Git and generated files
 
-This folder is self-contained (`backend/` only), so unzipping it into the repo root cannot overwrite your frontend or README. Then:
-
-```powershell
-git status          # expect only backend/ as new
-git add backend
-git commit -m "Add FastAPI backend"
-```
-
-`backend/.gitignore` keeps `.env`, `*.db` and `.venv` out of Git. Also make sure your root `.gitignore` ignores `node_modules/`.
+The repository root `.gitignore` and `backend/.gitignore` exclude `.env` files, Python virtual environments and caches, SQLite database files, `node_modules`, and Vite build output. Review `git status --short` from the repository root before committing; include the root README, frontend source/configuration, and backend source/tests/docs. Do not force-push or commit local databases, caches, build output, or secrets.
 
 ## Troubleshooting
 

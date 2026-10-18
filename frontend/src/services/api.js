@@ -52,6 +52,7 @@ export async function getAsset(id) { return request(`/api/assets/${encodeURIComp
 export async function getAssetReadings(id, limit = 120) { return request(`/api/assets/${encodeURIComponent(id)}/readings?limit=${limit}`); }
 export async function getPrediction(id, history = 100) { return request(`/api/predictions/${encodeURIComponent(id)}?history=${history}`); }
 export async function getAlerts() { return request('/api/alerts?active_only=true&limit=100'); }
+export async function getEvents(limit = 50) { return request(`/api/events?limit=${limit}`); }
 export async function getScenarios() { return request('/api/simulator/scenarios'); }
 export async function injectScenario(asset_id, scenario, intensity = 1, duration_ticks = null) {
   return request('/api/simulator/scenarios', { method: 'POST', body: JSON.stringify({ asset_id, scenario, intensity, duration_ticks }) });

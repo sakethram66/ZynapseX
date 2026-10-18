@@ -14,13 +14,14 @@ export default function App() {
   const [selectedAsset, setSelectedAsset] = useState(null);
   const data = useGridData();
   const onMessage = useCallback(data.handleMessage, [data.handleMessage]);
-  const connected = useWebSocket(onMessage);
+  const connection = useWebSocket(onMessage);
+  const connected = connection === 'connected';
   const asset = useMemo(() => data.assets.find(a => a.id === selectedAsset?.id) ?? selectedAsset ?? data.assets[0], [selectedAsset, data.assets]);
   const selectAsset = item => { setSelectedAsset(item); setPage('Asset'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const navigate = next => { setPage(next); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   return <div className="app-shell">
     <Header page={page === 'Asset' ? 'Assets' : page} setPage={navigate} alertCount={data.alerts.length} />
-    <SystemStatus system={data.system} connected={connected} />
+    <SystemStatus system={data.system} connection={connection} />
     <main className="main-content">
       {data.error && <div className="panel" role="alert">Backend connection failed: {data.error}. Start the API and refresh this page.</div>}
       {data.loading && <div className="panel">Connecting to the grid backend…</div>}
@@ -31,6 +32,6 @@ export default function App() {
         : page === 'Assets' ? <><div className="page-heading"><div><div className="breadcrumb">OPERATIONS <span>/</span> ASSETS</div><h1>Asset directory</h1><p>Monitor transformer health across your service territory.</p></div></div><div className="panel directory-panel">{data.assets.map(item => <button key={item.id} className="directory-row" onClick={() => selectAsset(item)}><span className={`asset-status ${item.status.toLowerCase()}`} /><span><b>{item.name}</b><small>{item.id} · {item.voltage} · {item.region}</small></span><span className="directory-health"><i><em style={{ width: `${item.health}%` }} /></i>{item.health}% health</span><span className={`risk-chip ${item.status.toLowerCase()}`}>{item.status}</span><ChevronRight size={16} /></button>)}</div></>
         : <Dashboard data={data} onSelectAsset={selectAsset} setPage={navigate} />}
     </main>
-    <footer className="app-footer"><div><span className="footer-brand">Z</span><span>Grid intelligence platform</span><span className="footer-dot">·</span><span>Simulation mode</span></div><div className="footer-right"><span className={connected ? 'connection connected' : 'connection'}><i />{connected ? 'Connected to grid' : 'Stream disconnected'}</span><button><CircleHelp size={14} />Help center</button><button><Settings2 size={14} />Settings</button><button className="footer-shortcut"><Command size={12} />K</button></div></footer>
+    <footer className="app-footer"><div><span className="footer-brand">Z</span><span>Grid intelligence platform</span><span className="footer-dot">·</span><span>Simulation mode</span></div><div className="footer-right"><span className={connected ? 'connection connected' : 'connection'}><i />{connected ? 'Connected to grid' : connection === 'connecting' ? 'Connecting to grid' : 'Stream disconnected'}</span><button><CircleHelp size={14} />Help center</button><button><Settings2 size={14} />Settings</button><button className="footer-shortcut"><Command size={12} />K</button></div></footer>
   </div>;
 }

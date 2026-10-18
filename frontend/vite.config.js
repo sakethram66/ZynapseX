@@ -10,4 +10,16 @@ export default defineConfig({
       '/ws': { target: 'ws://127.0.0.1:8000', ws: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'framework';
+          if (/node_modules\/(recharts|d3-[^/]+)\//.test(id)) return 'charts';
+          if (id.includes('node_modules/lucide-react/')) return 'icons';
+        },
+      },
+    },
+  },
 });
