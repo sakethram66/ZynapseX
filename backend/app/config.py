@@ -63,6 +63,10 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 # [t2,t3) HIGH, [t3,100] CRITICAL.
 DEFAULT_RISK_THRESHOLDS: tuple[float, float, float] = (25.0, 50.0, 70.0)
 
+# Uncalibrated Random Forest class-score bands. These are UI/alerting defaults,
+# not failure probabilities or validated safety thresholds.
+DEFAULT_FAILURE_SCORE_THRESHOLDS: tuple[float, float, float] = (0.20, 0.40, 0.65)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -94,6 +98,9 @@ class Settings:
     trend_limits: dict = field(default_factory=lambda: dict(DEFAULT_TREND_LIMITS))
     weights: dict = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     risk_thresholds: tuple = DEFAULT_RISK_THRESHOLDS
+    failure_score_thresholds: tuple = field(default_factory=lambda: tuple(
+        float(x.strip()) for x in os.getenv("FAILURE_SCORE_THRESHOLDS", "0.20,0.40,0.65").split(",")
+    ))
     # deployment label only; does not change behaviour
     deployment_target: str = field(default_factory=lambda: os.getenv("DEPLOYMENT_TARGET", "local"))
 

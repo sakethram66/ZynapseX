@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.config import Settings, get_settings
-from app.schemas import Contribution
+from app.schemas import Contribution, FailurePrediction
 
 # factor -> (label, unit)
 FACTOR_META: dict[str, tuple[str, str]] = {
@@ -80,7 +80,8 @@ def explain(risk: dict, features: dict[str, float], anomaly_score: float,
 
 
 def build_assessment(reading, features: dict[str, float], detector=None,
-                     settings: Settings | None = None, anomaly: dict | None = None):
+                     settings: Settings | None = None, anomaly: dict | None = None,
+                     failure_prediction: FailurePrediction | dict | None = None):
     """Run anomaly detection -> risk estimation -> classification -> explanation
     for one reading and return a `RiskAssessment`."""
     from app.ml.anomaly import get_detector
@@ -104,4 +105,5 @@ def build_assessment(reading, features: dict[str, float], detector=None,
         trends={k: round(features.get(k, 0.0), 4) for k in ("temp_slope", "vibration_slope", "load_slope")},
         contributions=contributions,
         summary=summary,
+        failure_prediction=failure_prediction or FailurePrediction(),
     )

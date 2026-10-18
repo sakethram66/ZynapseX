@@ -1,2 +1,13 @@
-import { ArrowUpRight, ChevronRight, Thermometer, Zap } from 'lucide-react';
-export default function TransformerCard({ asset, onClick }) { return <button className="transformer-row" onClick={onClick}><span className={`asset-status ${asset.status.toLowerCase()}`} /><span className="asset-name"><b>{asset.name}</b><small>{asset.id} · {asset.voltage ?? '132 kV'}</small></span><span className="asset-load"><span><Zap size={13} />{asset.load}%</span><small>Load</small></span><span className="asset-temp"><span><Thermometer size={13} />{asset.temp}°</span><small>Temp</small></span><span className={`risk-chip ${asset.status.toLowerCase()}`}>{asset.status}</span><ChevronRight size={16} className="asset-chevron" /></button>; }
+import { ChevronRight, Thermometer, Zap } from 'lucide-react';
+
+export default function TransformerCard({ asset, onClick }) {
+  const modelFlag = ['HIGH', 'CRITICAL'].includes(asset.failurePrediction?.risk_classification);
+  return <button className="transformer-row" onClick={onClick}>
+    <span className={`asset-status ${asset.status.toLowerCase()}`} />
+    <span className="asset-name"><b>{asset.name}</b><small>{asset.id} · {asset.voltage ?? '132 kV'}{modelFlag ? ' · Failure model flagged' : ''}</small></span>
+    <span className="asset-load"><span><Zap size={13} />{asset.load}%</span><small>Load</small></span>
+    <span className="asset-temp"><span><Thermometer size={13} />{asset.temp}°</span><small>Temp</small></span>
+    <span className={`risk-chip ${modelFlag ? 'warning' : asset.status.toLowerCase()}`}>{modelFlag ? 'Model flag' : asset.status}</span>
+    <ChevronRight size={16} className="asset-chevron" />
+  </button>;
+}

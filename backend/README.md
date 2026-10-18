@@ -4,7 +4,7 @@
 
 > **Honest scope**
 > - All data is **simulated**. Nothing here talks to real equipment, and the system is **decision support only**: it never controls or switches anything.
-> - The **risk score is a prototype risk index** from transparent engineering rules, **not a calibrated probability of real failure**. No model was trained on failure labels and no accuracy figures are claimed.
+> - The **risk score is a prototype risk index** from transparent engineering rules, **not a calibrated probability of real failure**. A separate Random Forest predicts a synthetic 12-tick event label; its dataset and holdout metrics are synthetic-only and do not establish real-world accuracy.
 > - Nothing is deployed on IBM Z / LinuxONE and no IBM service is integrated (see [IBM Z / LinuxONE](#ibm-z--linuxone)).
 > - The existing React frontend is now connected to these APIs and the `/ws/grid` stream. See [`docs/FRONTEND_INTEGRATION.md`](docs/FRONTEND_INTEGRATION.md) for the live contracts and local proxy setup.
 
@@ -12,10 +12,10 @@
 
 | Part | Status |
 |---|---|
-| Backend suite | **70 passed** with `python -m pytest -q --basetemp .pytest_tmp` (2 Pydantic warnings during WebSocket tests) |
+| Backend suite | **77 passed** with `python -m pytest -q --basetemp .pytest_tmp` |
 | Python syntax | **Passed** with `python -m compileall -q app` |
 | REST and fault-flow checks | **Passed**: health, status, assets, detail/history, predictions, recommendations, scenario injection/clear, and illustrative what-if; overheating on T01 yielded anomaly 0.7713, HIGH risk 50.54, two alerts, and an inspection recommendation |
-| Frontend production build | **Passed** with `npm run build` (Vite reports a >500 kB chunk advisory) |
+| Frontend production build | **Passed** with `npm run build`; all JavaScript chunks are below Vite's 500 kB advisory threshold |
 | Browser UI | **Not visually verified in this environment**; no browser surface was available. |
 
 Run the backend suite with:
@@ -82,6 +82,7 @@ Environment variables (see `.env.example`; none are secrets). With uvicorn you c
 | `SCENARIO_RAMP_TICKS` | `15` | samples for a scenario to reach full strength |
 | `READINGS_KEEP_PER_ASSET` / `PREDICTIONS_KEEP_PER_ASSET` | `3000` / `1000` | retention |
 | `SIM_LOAD_LIMIT_PCT` / `SIM_CAUTION_PCT` | `100` / `90` | what-if limits (% of rating) |
+| `FAILURE_SCORE_THRESHOLDS` | `0.20,0.40,0.65` | provisional uncalibrated model-score bands; not validated safety thresholds |
 | `DEPLOYMENT_TARGET` | `local` | label shown in `/api/health` only |
 
 Engineering limits, risk weights and level cut-offs live in `app/config.py` (`DEFAULT_LIMITS`, `DEFAULT_WEIGHTS`, `DEFAULT_RISK_THRESHOLDS`) and are overridable through the `Settings` object.
@@ -97,9 +98,11 @@ simulator tick -> features -> anomaly detection -> risk estimate -> level -> exp
 
 **Features** (`app/processing/features.py`): current vs rated, voltage deviation %, frequency deviation, power-factor shortfall (vs 0.95), plus least-squares slopes of temperature, vibration and load over the last 10 samples.
 
-**Anomaly detection** (`app/ml/anomaly.py`): Isolation Forest (fixed `random_state`) plus a z-score baseline, both fitted **only on simulated normal-operation data** (no labels), calibrated on a held-out normal run. `anomaly_score = max(isolation_forest_score, zscore_score)`; flagged at >= 0.5. On simulated normal data the flag rate was about 0.3-1 % in my checks. That is a false-alarm rate on simulated data, not accuracy on real faults.
+**Anomaly detection** (`app/ml/anomaly.py`): Isolation Forest (fixed `random_state`) plus a z-score baseline, both fitted **only on simulated normal-operation data** (no labels), calibrated on a held-out normal run. `anomaly_score = max(isolation_forest_score, zscore_score)`; flagged at >= 0.5. This novelty detector remains separate from the future event classifier.
 
-**Risk estimate** (`app/ml/failure_prediction.py`), fully documented in the module:
+**Failure-horizon classifier** (`app/ml/failure_prediction.py`): classifies whether a generated event label occurs within the next 12 simulator ticks. The Random Forest uses separate, stratified, episode-disjoint training and test CSVs, train-only imputation, rolling sensor slopes, and class weighting. It returns a four-level category and an explicitly uncalibrated model score; calibrated failure probabilities are not exposed. `GET /api/model/failure` returns the saved evaluation summary, and transformer details expose recent persisted classifications. Data generation, the measured synthetic-only holdout report, source investigation, commands, and limitations are documented in [`docs/FAILURE_MODEL.md`](docs/FAILURE_MODEL.md).
+
+**Rule-based risk estimate** (`app/ml/failure_prediction.py`), fully documented in the module:
 
 1. Per-metric stress 0-1 from `(ok, warn, crit)` limits (0 below ok, 0.5 at warn, 1.0 at crit).
 2. `risk = 100 * clip(0.30*weighted_stress + 0.55*worst_metric + 0.10*trend + 0.05*anomaly)`.

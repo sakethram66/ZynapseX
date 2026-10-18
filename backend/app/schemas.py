@@ -61,6 +61,27 @@ class Contribution(BaseModel):
     detail: str
 
 
+class FailureFeatureDriver(BaseModel):
+    feature: str
+    importance: float
+    observed_value: float
+
+
+class FailurePrediction(BaseModel):
+    available: bool = False
+    model_version: Optional[str] = None
+    horizon_ticks: Optional[int] = None
+    horizon_seconds: Optional[float] = None
+    predicted_failure_within_horizon: Optional[bool] = None
+    risk_classification: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL", "UNAVAILABLE"] = "UNAVAILABLE"
+    model_score: Optional[float] = Field(default=None, ge=0, le=1)
+    model_score_meaning: Optional[str] = None
+    probability: Optional[float] = None
+    probability_calibrated: bool = False
+    top_features: list[FailureFeatureDriver] = Field(default_factory=list)
+    message: str = "Failure prediction model is unavailable."
+
+
 class RiskAssessment(BaseModel):
     asset_id: str
     timestamp: datetime
@@ -73,6 +94,7 @@ class RiskAssessment(BaseModel):
     trends: dict[str, float]
     contributions: list[Contribution]
     summary: str
+    failure_prediction: FailurePrediction = Field(default_factory=FailurePrediction)
     disclaimer: str = RISK_DISCLAIMER
 
 

@@ -28,6 +28,7 @@ export function mapAsset(item) {
   return {
     ...item, id: item.asset_id, region: regionName(item.substation_id), type: 'Power transformer',
     load: reading.load_pct ?? 0, risk, temp: reading.temperature ?? 0,
+    failurePrediction: item.risk?.failure_prediction ?? item.failure_prediction ?? null,
     status: level === 'LOW' ? 'Healthy' : level === 'CRITICAL' ? 'Critical' : 'Warning', riskLevel: level, health: Math.max(0, Math.round(100 - risk)),
     left: cx + (slot % 3 - 1) * 8, top: cy + (Math.floor(slot / 3) - 0.5) * 10,
     voltage: `${item.rating_kva} kVA`, current: reading.current ?? 0, latest_reading: reading,
@@ -40,13 +41,17 @@ export function mapAlert(alert, assets = []) {
     time: alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '', detail: alert.message };
 }
 export async function getGridData() {
-  const [status, rawAssets, rawAlerts, recommendations, events] = await Promise.all([
+  const [status, rawAssets, rawAlerts, recommendations, events, failureModel] = await Promise.all([
     request('/api/grid/status'), request('/api/assets'), request('/api/alerts?active_only=true&limit=100'),
     request('/api/recommendations'), request('/api/events?limit=20'),
+    request('/api/model/failure').catch(() => ({
+      available: false, evaluation: null,
+      data_notice: 'Failure-model summary endpoint is unavailable. Restart the backend to load the current API.',
+    })),
   ]);
   const assets = rawAssets.map(mapAsset);
   return { assets, alerts: rawAlerts.map(a => mapAlert(a, assets)), recommendations, events,
-    updatedAt: status.last_update, status, system: status };
+    updatedAt: status.last_update, status, system: status, failureModel };
 }
 export async function getAsset(id) { return request(`/api/assets/${encodeURIComponent(id)}`); }
 export async function getAssetReadings(id, limit = 120) { return request(`/api/assets/${encodeURIComponent(id)}/readings?limit=${limit}`); }

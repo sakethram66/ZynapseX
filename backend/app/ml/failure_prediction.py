@@ -1,8 +1,10 @@
-"""Transparent failure-RISK estimation (a prototype risk index, not a trained model).
+"""Separate engineering risk scoring and synthetic failure-horizon inference.
 
-There is no labelled failure dataset, so nothing here is trained on failures and
-the output is NOT a calibrated probability of failure. It is a documented,
-deterministic engineering score:
+The transparent engineering score below is not a trained failure model or a
+calibrated probability. The saved Random Forest adapter later in this module
+predicts a synthetic scheduled-event label within a future horizon.
+
+Engineering score:
 
   1. Per-metric stress s_i in [0, 1] from configurable (ok, warn, crit) limits:
         x <= ok -> 0 ;  ok..warn -> 0..0.5 ;  warn..crit -> 0.5..1 (clipped)
@@ -20,7 +22,21 @@ is reported as "contribution points" (see explainability.py).
 """
 from __future__ import annotations
 
-from app.config import Settings, get_settings
+import logging
+import os
+from functools import lru_cache
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+import sklearn
+
+from app.config import DEFAULT_FAILURE_SCORE_THRESHOLDS, Settings, get_settings
+from app.ml.synthetic_failure_data import MODEL_FEATURES
+from app.schemas import FailurePrediction
+
+log = logging.getLogger("zynapsex.failure_prediction")
 
 COEF_WEIGHTED = 0.30
 COEF_MAX = 0.55
@@ -103,3 +119,81 @@ def estimate_risk(features: dict[str, float], anomaly_score: float,
         "trend_stresses": {k: round(v, 4) for k, v in trends.items()},
         "points": {k: round(v, 3) for k, v in points.items()},
     }
+
+
+class FailurePredictor:
+    """Inference adapter for the separate synthetic-horizon classifier.
+
+    Class scores are returned without a probability because calibration has
+    not been validated. Feature importances are global drivers, not causal
+    per-sample explanations.
+    """
+
+    def __init__(self, pipeline, metadata: dict):
+        self.pipeline = pipeline
+        self.metadata = metadata
+        classifier = pipeline.named_steps["classifier"]
+        self.importances = dict(zip(MODEL_FEATURES, classifier.feature_importances_))
+
+    def predict_many(self, rows: list[dict[str, float]], sample_interval_s: float,
+                     thresholds: tuple[float, float, float] = DEFAULT_FAILURE_SCORE_THRESHOLDS) -> list[FailurePrediction]:
+        if not rows:
+            return []
+        if len(thresholds) != 3 or not 0 <= thresholds[0] < thresholds[1] < thresholds[2] <= 1:
+            raise ValueError("failure score thresholds must be three increasing values in [0, 1]")
+        try:
+            frame = pd.DataFrame([{name: row[name] for name in MODEL_FEATURES} for row in rows],
+                                 columns=MODEL_FEATURES).apply(pd.to_numeric, errors="coerce")
+            if not np.isfinite(frame.to_numpy(dtype=float)).all():
+                raise ValueError("model input contains missing, non-numeric, or non-finite values")
+            scores = self.pipeline.predict_proba(frame)[:, list(self.pipeline.classes_).index(1)]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"invalid failure model input: {exc}") from exc
+        horizon = int(self.metadata["prediction_horizon_ticks"])
+        version = str(self.metadata["model_version"])
+        drivers = sorted(self.importances.items(), key=lambda item: item[1], reverse=True)[:3]
+        out = []
+        for row, score in zip(rows, scores):
+            score = float(score)
+            category = ("LOW" if score < thresholds[0] else "MEDIUM" if score < thresholds[1]
+                        else "HIGH" if score < thresholds[2] else "CRITICAL")
+            elevated = category in ("HIGH", "CRITICAL")
+            out.append(FailurePrediction(
+                available=True, model_version=version, horizon_ticks=horizon,
+                horizon_seconds=round(horizon * sample_interval_s, 3),
+                predicted_failure_within_horizon=elevated,
+                risk_classification=category, model_score=score,
+                model_score_meaning="Uncalibrated Random Forest class score from 0 to 1 (not a failure probability).",
+                probability=None, probability_calibrated=False,
+                top_features=[{"feature": name, "importance": float(value),
+                               "observed_value": float(row[name])} for name, value in drivers],
+                message=(f"Synthetic-trained classifier category is {category} for the stated horizon."
+                         if elevated else f"Synthetic-trained classifier category is {category}; continue routine monitoring."),
+            ))
+        return out
+
+
+@lru_cache(maxsize=4)
+def get_failure_predictor(model_path: str | None = None) -> FailurePredictor | None:
+    """Load the trained artifact once; missing/invalid artifacts disable only this model."""
+    default_path = Path(__file__).resolve().parents[2] / "artifacts" / "failure_model.joblib"
+    path = Path(model_path or os.getenv("FAILURE_MODEL_PATH", str(default_path)))
+    if not path.is_file():
+        log.warning("Failure prediction model unavailable; artifact not found: %s", path)
+        return None
+    try:
+        artifact = joblib.load(path)
+        metadata = artifact["metadata"]
+        if metadata.get("scikit_learn_version") != sklearn.__version__:
+            raise ValueError(
+                f"artifact was trained with scikit-learn {metadata.get('scikit_learn_version')}, "
+                f"but runtime has {sklearn.__version__}; retrain in this environment"
+            )
+        if metadata.get("features") != MODEL_FEATURES:
+            raise ValueError("artifact feature list does not match this application")
+        if metadata.get("probability_calibration_validated"):
+            log.warning("Artifact declares calibration, but this API intentionally suppresses probability")
+        return FailurePredictor(artifact["pipeline"], metadata)
+    except Exception:
+        log.exception("Could not load failure prediction artifact %s", path)
+        return None

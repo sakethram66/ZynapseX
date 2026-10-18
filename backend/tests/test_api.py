@@ -35,6 +35,21 @@ def test_grid_status_assets_and_detail(client):
     assert len(assets) == 20 and assets[0]["latest_reading"]["asset_id"] == "T01"
     d = client.get("/api/assets/t17").json()  # case-insensitive
     assert d["asset_id"] == "T17" and d["assessment"]["risk_level"] == "LOW" and "recommendations" in d
+    assert "failure_prediction" in d["assessment"]
+    assert "failure_prediction" in d["risk"]
+    assert d["assessment"]["failure_prediction"]["probability"] is None
+
+
+def test_failure_model_evaluation_api_and_saved_history(client):
+    summary = client.get("/api/model/failure")
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["evaluation"]["baseline"]["name"].startswith("majority class")
+    assert body["evaluation"]["test_rows"] > 0 and "Synthetic" in body["data_notice"]
+    _warm(client, 3)
+    prediction = client.get("/api/predictions/T01", params={"history": 2}).json()
+    assert len(prediction["history"]) == 2
+    assert "failure_prediction" in prediction["history"][0]
 
 
 def test_readings_endpoints(client):

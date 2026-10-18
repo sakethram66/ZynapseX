@@ -111,11 +111,19 @@ def generate_recommendations(
         watch.append(risk_cond)
     if assessment.is_anomaly:
         watch.append(f"anomaly_score={assessment.anomaly_score:.2f} (>=0.5)")
+    if (assessment.failure_prediction.available
+            and assessment.failure_prediction.predicted_failure_within_horizon):
+        watch.append(
+            f"synthetic_model={assessment.failure_prediction.model_version}: "
+            f"predicted failure within {assessment.failure_prediction.horizon_ticks} simulator ticks"
+        )
     for k, v in trends.items():
         if v >= 0.3:
             watch.append(f"{k}={features[k]:.3g}/sample (trend stress {v:.2f})")
     if watch:
-        add("MEDIUM" if lvl >= 1 else "LOW", "INCREASE_MONITORING",
+        model_flagged = (assessment.failure_prediction.available
+                         and assessment.failure_prediction.predicted_failure_within_horizon)
+        add("MEDIUM" if lvl >= 1 or model_flagged else "LOW", "INCREASE_MONITORING",
             f"Increase monitoring frequency for {aid}",
             "Readings are deviating from normal; sample this asset more often until it settles.",
             watch)

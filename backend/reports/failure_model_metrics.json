@@ -1,0 +1,116 @@
+{
+  "model_version": "synthetic-rf-v1",
+  "scikit_learn_version": "1.9.1",
+  "dataset": {
+    "train": "synthetic_transformer_failure_train.csv",
+    "test": "synthetic_transformer_failure_test.csv"
+  },
+  "dataset_provenance": "synthetic; generated from this project's simulator and scheduled synthetic event labels",
+  "prediction_horizon_ticks": 12,
+  "positive_label": "failure_within_horizon",
+  "split_method": "80/20 group split by transformer ID; neither asset IDs nor episode IDs overlap",
+  "train_transformers": 16,
+  "test_transformers": 4,
+  "random_state": 42,
+  "train_episodes": 192,
+  "test_episodes": 48,
+  "train_rows": 17489,
+  "test_rows": 4311,
+  "train_positive_rows": 1152,
+  "test_positive_rows": 288,
+  "test_positive_prevalence": 0.06680584551148225,
+  "model_decision_score_threshold": 0.4,
+  "precision": 0.46742209631728043,
+  "recall": 0.5729166666666666,
+  "f1": 0.514820592823713,
+  "confusion_matrix_labels_0_1": [
+    [
+      3835,
+      188
+    ],
+    [
+      123,
+      165
+    ]
+  ],
+  "baseline": {
+    "name": "majority class (always predict no failure)",
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "confusion_matrix_labels_0_1": [
+      [
+        4023,
+        0
+      ],
+      [
+        288,
+        0
+      ]
+    ],
+    "roc_auc": null
+  },
+  "roc_auc_uncalibrated_score": 0.9456242922639269,
+  "probability_calibration_validated": false,
+  "risk_score_thresholds": [
+    0.2,
+    0.4,
+    0.65
+  ],
+  "calibrated_probability_exposed": false,
+  "global_feature_importance": [
+    {
+      "feature": "temperature",
+      "importance": 0.2713895090333973
+    },
+    {
+      "feature": "vibration",
+      "importance": 0.22958083128498338
+    },
+    {
+      "feature": "power_factor",
+      "importance": 0.12013720788366765
+    },
+    {
+      "feature": "current",
+      "importance": 0.07196480404826426
+    },
+    {
+      "feature": "voltage",
+      "importance": 0.0681478339623634
+    },
+    {
+      "feature": "temp_slope",
+      "importance": 0.06120318058823795
+    },
+    {
+      "feature": "load_pct",
+      "importance": 0.06082512372054923
+    },
+    {
+      "feature": "load_slope",
+      "importance": 0.04046770033872942
+    },
+    {
+      "feature": "vibration_slope",
+      "importance": 0.039066061629323676
+    },
+    {
+      "feature": "frequency",
+      "importance": 0.015474156540542199
+    },
+    {
+      "feature": "rating_kva",
+      "importance": 0.011291690301667365
+    },
+    {
+      "feature": "rated_current_a",
+      "importance": 0.010451900668274165
+    }
+  ],
+  "limitations": [
+    "Synthetic labels are scheduled simulator events, not observed failures.",
+    "Holdout metrics measure separation within this synthetic generator only.",
+    "Metrics do not establish real-world accuracy or calibrated failure probability."
+  ]
+}

@@ -23,10 +23,10 @@ from app.database.repository import Repository
 from app.decision.decision_engine import PRIORITY_ORDER, generate_recommendations
 from app.ml.anomaly import get_detector
 from app.ml.explainability import build_assessment
-from app.ml.failure_prediction import metric_stresses
+from app.ml.failure_prediction import get_failure_predictor, metric_stresses
 from app.processing.features import FeatureWindow
 from app.schemas import (
-    Alert, AssetInfo, Recommendation, RiskAssessment, ScenarioInjectRequest, SensorReading,
+    Alert, AssetInfo, FailurePrediction, Recommendation, RiskAssessment, ScenarioInjectRequest, SensorReading,
     WhatIfRequest, WhatIfResult, utcnow,
 )
 from app.simulation.what_if import run_what_if
@@ -39,6 +39,8 @@ log = logging.getLogger("zynapsex.pipeline")
 SEVERITY_RANK = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
 LEVEL_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 ANOMALY_STREAK_TO_ALERT = 3
+FAILURE_STREAK_TO_ALERT = 3
+FAILURE_CLEAR_STREAK_TO_RESOLVE = 3
 HYSTERESIS = 0.9  # an active metric alert clears only below 90 % of its warn stress
 
 METRIC_ALERTS = {
@@ -55,7 +57,7 @@ Broadcast = Callable[[dict], Awaitable[None]]
 
 
 class GridPipeline:
-    def __init__(self, repo: Repository, settings: Settings, detector=None):
+    def __init__(self, repo: Repository, settings: Settings, detector=None, failure_predictor=None):
         self.repo = repo
         self.settings = settings
         self.fleet: list[AssetInfo] = build_fleet()
@@ -64,10 +66,13 @@ class GridPipeline:
                                  fleet=self.fleet)
         self.window = FeatureWindow(settings.window_size)
         self.detector = detector or get_detector()
+        self.failure_predictor = failure_predictor if failure_predictor is not None else get_failure_predictor()
         self.latest: dict[str, dict] = {}
         self.last_tick_at: Optional[datetime] = None
         self._active_alerts: dict[tuple[str, str], tuple[str, int]] = {}
         self._anomaly_streak: dict[str, int] = {}
+        self._failure_streak: dict[str, int] = {}
+        self._failure_clear_streak: dict[str, int] = {}
         self._rec_state: dict[tuple[str, str], tuple[int, int]] = {}  # -> (tick, priority rank)
         self._lock = threading.RLock()
         self._task: Optional[asyncio.Task] = None
@@ -100,14 +105,35 @@ class GridPipeline:
                 feats[r.asset_id] = self.window.features(r, self.assets[r.asset_id])
 
             anomalies = self.detector.score_many([feats[r.asset_id] for r in readings])
+            failure_predictions = [FailurePrediction() for _ in readings]
+            if self.failure_predictor is not None:
+                model_rows = [{
+                    "temperature": r.temperature, "voltage": r.voltage, "current": r.current,
+                    "load_pct": r.load_pct, "frequency": r.frequency, "vibration": r.vibration,
+                    "power_factor": r.power_factor,
+                    "temp_slope": feats[r.asset_id]["temp_slope"],
+                    "vibration_slope": feats[r.asset_id]["vibration_slope"],
+                    "load_slope": feats[r.asset_id]["load_slope"],
+                    "rating_kva": self.assets[r.asset_id].rating_kva,
+                    "rated_current_a": self.assets[r.asset_id].rated_current_a,
+                } for r in readings]
+                try:
+                    failure_predictions = self.failure_predictor.predict_many(
+                        model_rows, self.settings.sample_interval_s,
+                        self.settings.failure_score_thresholds)
+                except Exception:
+                    log.exception("Failure prediction inference failed; preserving the rest of the pipeline")
+                    failure_predictions = [FailurePrediction(message="Failure model inference failed.")
+                                           for _ in readings]
             assessments: list[RiskAssessment] = []
             events: list[dict] = []
             new_alerts: list[Alert] = []
             new_recs: list[Recommendation] = []
 
-            for r, an in zip(readings, anomalies):
+            for r, an, failure_prediction in zip(readings, anomalies, failure_predictions):
                 f = feats[r.asset_id]
-                a = build_assessment(r, f, settings=self.settings, anomaly=an)
+                a = build_assessment(r, f, settings=self.settings, anomaly=an,
+                                     failure_prediction=failure_prediction)
                 assessments.append(a)
                 recs = generate_recommendations(r, a, f, self.settings, now)
                 self.latest[r.asset_id] = {"reading": r, "assessment": a, "recommendations": recs}
@@ -158,6 +184,22 @@ class GridPipeline:
             sev = "CRITICAL" if a.risk_level == "CRITICAL" else "WARNING"
             out["RISK_HIGH"] = (sev, f"Risk level {a.risk_level} ({a.risk_score:.0f}/100). {a.summary}",
                                 a.risk_score, s.risk_thresholds[1 if a.risk_level == "HIGH" else 2])
+        model_flag = (a.failure_prediction.available
+                      and a.failure_prediction.predicted_failure_within_horizon)
+        active_failure = (aid, "FAILURE_HORIZON") in self._active_alerts
+        self._failure_streak[aid] = self._failure_streak.get(aid, 0) + 1 if model_flag else 0
+        self._failure_clear_streak[aid] = 0 if model_flag else self._failure_clear_streak.get(aid, 0) + 1
+        if model_flag and (active_failure or self._failure_streak[aid] >= FAILURE_STREAK_TO_ALERT):
+            horizon = a.failure_prediction.horizon_ticks
+            out["FAILURE_HORIZON"] = (
+                "WARNING",
+                f"Synthetic-trained failure classifier flags {aid} within {horizon} simulator ticks; verify with an inspection.",
+                None, None,
+            )
+        elif active_failure and self._failure_clear_streak[aid] < FAILURE_CLEAR_STREAK_TO_RESOLVE:
+            out["FAILURE_HORIZON"] = (
+                "WARNING", f"Monitoring the recent synthetic failure-model flag for {aid}.", None, None,
+            )
         streak = self._anomaly_streak.get(aid, 0) + 1 if a.is_anomaly else 0
         self._anomaly_streak[aid] = streak
         if streak >= ANOMALY_STREAK_TO_ALERT or (("ANOMALY" in {c for (x, c) in self._active_alerts if x == aid})
@@ -250,7 +292,9 @@ class GridPipeline:
             "latest_reading": cur["reading"].model_dump(mode="json") if cur else None,
             "risk": ({"risk_score": cur["assessment"].risk_score, "risk_level": cur["assessment"].risk_level,
                       "anomaly_score": cur["assessment"].anomaly_score,
-                      "is_anomaly": cur["assessment"].is_anomaly, "summary": cur["assessment"].summary}
+                      "is_anomaly": cur["assessment"].is_anomaly,
+                      "failure_prediction": cur["assessment"].failure_prediction.model_dump(mode="json"),
+                      "summary": cur["assessment"].summary}
                      if cur else None),
             "active_scenario": self.sim.active_scenarios().get(asset_id),
         }
