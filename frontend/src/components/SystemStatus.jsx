@@ -1,0 +1,4 @@
+import { Activity, Radio, ShieldCheck, Zap } from 'lucide-react';
+export default function SystemStatus({ system = {} }) {
+  return <div className="status-strip"><div className="status-live"><span className="pulse-dot" />All systems operational</div><span className="status-sep" /><div className="status-item"><Zap size={15} /><span>Grid frequency</span><b>{system.frequency ?? '50.02'} <small>Hz</small></b></div><div className="status-item"><ShieldCheck size={15} /><span>Availability</span><b>{system.availability ?? '99.97'}<small>%</small></b></div><div className="status-item"><Radio size={15} /><span>Assets online</span><b>{system.monitoredAssets ?? 24}<small> / 24</small></b></div><div className="status-updated"><Activity size={14} />Live telemetry <span className="pulse-dot" /></div></div>
+}
